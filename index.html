@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <!-- 모바일 환경에 최적화된 뷰포트 설정 (확대 방지 등) -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI 분류 스캐너</title>
+    <!-- Tailwind CSS 불러오기 (모던한 UI 디자인을 위해 사용) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 웹캠 캔버스가 부모 요소에 꽉 차도록 설정 */
+        canvas {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: cover;
+        }
+        /* 앱 느낌을 주기 위해 스크롤바 숨김 처리 */
+        ::-webkit-scrollbar {
+            display: none;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen flex flex-col font-sans antialiased text-slate-800 selection:bg-blue-200">
+
+    <!-- 앱 헤더 -->
+    <header class="bg-white shadow-sm px-6 py-4 sticky top-0 z-10 flex justify-center items-center rounded-b-2xl">
+        <h1 class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="url(#blue-gradient)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <defs>
+                    <linearGradient id="blue-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" stop-color="#2563eb" />
+                        <stop offset="100%" stop-color="#4f46e5" />
+                    </linearGradient>
+                </defs>
+                <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
+                <circle cx="12" cy="13" r="3"/>
+            </svg>
+            AI 스캐너
+        </h1>
+    </header>
+
+    <!-- 메인 컨텐츠 영역 -->
+    <main class="flex-1 flex flex-col w-full max-w-md mx-auto p-4 gap-4">
+        
+        <!-- 에러 메시지 표시 영역 (기본적으로 숨김) -->
+        <div id="error-message" class="hidden bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-lg shadow-sm text-sm">
+            <p class="font-bold">웹캠 접근 오류</p>
+            <p>카메라 권한을 허용해주시거나, HTTPS 환경인지 확인해주세요.</p>
+        </div>
+
+        <!-- 카메라 화면 컨테이너 -->
+        <div class="relative w-full aspect-square bg-slate-200 rounded-3xl overflow-hidden shadow-inner flex flex-col items-center justify-center border-4 border-white">
+            
+            <div id="webcam-container" class="absolute inset-0 w-full h-full flex items-center justify-center bg-black z-0 hidden">
+                <!-- 여기에 캔버스가 삽입됩니다 -->
+            </div>
+            
+            <!-- 카메라 전환 버튼 (실행 후 표시) -->
+            <button id="switch-camera-btn" onclick="toggleCamera()" class="hidden absolute top-4 right-4 z-30 bg-black/40 hover:bg-black/60 text-white p-2.5 rounded-full backdrop-blur-md transition-all active:scale-90 shadow-lg">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+            </button>
+
+            <!-- 카메라 시작 전 표시될 자리표시자 (Placeholder) -->
+            <div id="placeholder" class="z-10 flex flex-col items-center text-slate-400">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mb-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                <span class="text-sm font-medium">하단의 버튼을 눌러 시작하세요</span>
+            </div>
+
+            <!-- 로딩 스피너 (모델 불러오는 중) -->
+            <div id="loading" class="z-20 hidden absolute inset-0 bg-white/80 backdrop-blur-sm flex-col items-center justify-center">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-3"></div>
+                <span class="text-blue-700 font-medium text-sm animate-pulse">AI 모델 로딩 중...</span>
+            </div>
+        </div>
+
+        <!-- 실행 버튼 -->
+        <button id="start-btn" type="button" onclick="init()" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-4 px-6 rounded-2xl shadow-lg shadow-blue-500/30 transform transition active:scale-95 flex justify-center items-center gap-2 text-lg">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            카메라 스캔 시작
+        </button>
+
+        <!-- 결과 라벨 표시 영역 (Progress bar 형태) -->
+        <div class="bg-white rounded-3xl p-5 shadow-sm mt-2 border border-slate-100 flex-1">
+            <h2 class="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4 border-b pb-2">분석 결과</h2>
+            <div id="label-container" class="flex flex-col gap-4">
+                <!-- 결과가 여기에 바(bar) 형태로 추가됩니다 -->
+                <div class="text-center text-slate-400 text-sm py-4" id="empty-result">
+                    아직 분석된 결과가 없습니다.
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+    
+    <script type="text/javascript">
+        // 사용자의 모델 링크
+        const URL = "https://teachablemachine.withgoogle.com/models/yen4K_ihO/";
+
+        let model, webcam, labelContainer, maxPredictions;
+        let isPlaying = false;
+        let currentFacingMode = "environment"; // 기본: 후면 카메라
+        let isFlipped = false; // 후면 카메라일 때는 좌우 반전 안 함
+
+        // UI 요소들
+        const startBtn = document.getElementById('start-btn');
+        const loadingUI = document.getElementById('loading');
+        const placeholder = document.getElementById('placeholder');
+        const webcamContainer = document.getElementById('webcam-container');
+        const switchBtn = document.getElementById('switch-camera-btn');
+        const errorMsg = document.getElementById('error-message');
+        const emptyResult = document.getElementById('empty-result');
+        
+        labelContainer = document.getElementById("label-container");
+
+        // 모델을 로드하고 웹캠을 설정하는 함수
+        async function init() {
+            if(isPlaying) return; // 이미 실행 중이면 무시
+
+            // UI 상태 변경: 로딩 중
+            startBtn.disabled = true;
+            startBtn.classList.add('opacity-70', 'cursor-not-allowed');
+            loadingUI.classList.remove('hidden');
+            loadingUI.classList.add('flex');
+            errorMsg.classList.add('hidden');
+
+            try {
+                const modelURL = URL + "model.json";
+                const metadataURL = URL + "metadata.json";
+
+                // 모델과 메타데이터 로드
+                model = await tmImage.load(modelURL, metadataURL);
+                maxPredictions = model.getTotalClasses();
+
+                // 웹캠 설정 (모바일 환경을 위해 크기를 키움)
+                webcam = new tmImage.Webcam(400, 400, isFlipped); 
+                
+                await webcam.setup({ facingMode: currentFacingMode }); // 현재 설정된 카메라 모드(전/후면) 시도
+                await webcam.play();
+                isPlaying = true;
+                window.requestAnimationFrame(loop);
+
+                // UI 상태 변경: 카메라 켜짐
+                loadingUI.classList.add('hidden');
+                loadingUI.classList.remove('flex');
+                placeholder.classList.add('hidden');
+                webcamContainer.classList.remove('hidden');
+                startBtn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    분석 중...
+                `;
+                startBtn.classList.replace('from-blue-600', 'from-emerald-500');
+                startBtn.classList.replace('to-indigo-600', 'to-teal-500');
+                emptyResult.style.display = 'none';
+                switchBtn.classList.remove('hidden'); // 카메라 전환 버튼 활성화
+
+                // 화면에 웹캠 캔버스 추가
+                webcamContainer.innerHTML = "";
+                webcamContainer.appendChild(webcam.canvas);
+                
+                // 결과 라벨 UI 초기화 (Progress Bar 생성)
+                labelContainer.innerHTML = ""; 
+                for (let i = 0; i < maxPredictions; i++) {
+                    const className = model.getClassLabels()[i];
+                    
+                    // Tailwind CSS를 이용한 프로그래스 바 UI 생성
+                    const barHTML = `
+                        <div class="w-full">
+                            <div class="flex justify-between items-end mb-1">
+                                <span class="text-sm font-semibold text-slate-700">${className}</span>
+                                <span class="text-sm font-bold text-blue-600" id="percent-${i}">0%</span>
+                            </div>
+                            <div class="w-full bg-slate-100 rounded-full h-3 overflow-hidden shadow-inner">
+                                <div id="bar-${i}" class="bg-gradient-to-r from-blue-500 to-indigo-500 h-3 rounded-full transition-all duration-300 ease-out" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    `;
+                    const div = document.createElement("div");
+                    div.innerHTML = barHTML;
+                    labelContainer.appendChild(div);
+                }
+            } catch (error) {
+                // 권한 거부 또는 카메라 없는 경우 예외 처리
+                console.error(error);
+                loadingUI.classList.add('hidden');
+                loadingUI.classList.remove('flex');
+                startBtn.disabled = false;
+                startBtn.classList.remove('opacity-70', 'cursor-not-allowed');
+                errorMsg.classList.remove('hidden');
+            }
+        }
+
+        // 지속적으로 렌더링하고 예측하는 루프
+        async function loop() {
+            if(!isPlaying) return;
+            webcam.update(); // 웹캠 프레임 업데이트
+            await predict();
+            window.requestAnimationFrame(loop);
+        }
+
+        // 웹캠 이미지를 모델에 넣어 예측하고 UI(프로그래스 바) 업데이트
+        async function predict() {
+            const prediction = await model.predict(webcam.canvas);
+            
+            for (let i = 0; i < maxPredictions; i++) {
+                const percent = Math.round(prediction[i].probability * 100);
+                
+                // HTML 요소 업데이트
+                const percentText = document.getElementById(`percent-${i}`);
+                const progressBar = document.getElementById(`bar-${i}`);
+                
+                if(percentText && progressBar) {
+                    percentText.innerText = percent + "%";
+                    progressBar.style.width = percent + "%";
+                    
+                    // 확률이 가장 높은(80% 이상) 클래스는 강조색(녹색 계열)으로 변경
+                    if (percent > 80) {
+                        progressBar.classList.replace('from-blue-500', 'from-emerald-400');
+                        progressBar.classList.replace('to-indigo-500', 'to-emerald-500');
+                        percentText.classList.replace('text-blue-600', 'text-emerald-600');
+                    } else {
+                        progressBar.classList.replace('from-emerald-400', 'from-blue-500');
+                        progressBar.classList.replace('to-emerald-500', 'to-indigo-500');
+                        percentText.classList.replace('text-emerald-600', 'text-blue-600');
+                    }
+                }
+            }
+        }
+
+        // 카메라 전면/후면 전환 함수
+        async function toggleCamera() {
+            if (!isPlaying) return;
+
+            // 전환 중일 때 버튼 비활성화 (시각적 피드백)
+            switchBtn.classList.add('opacity-50', 'pointer-events-none');
+            
+            try {
+                // 기존 웹캠 중지
+                await webcam.stop();
+                
+                // 모드 전환 (전면 <-> 후면)
+                if (currentFacingMode === "environment") {
+                    currentFacingMode = "user"; // 전면 카메라로 변경
+                    isFlipped = true;           // 거울처럼 좌우 반전 적용
+                } else {
+                    currentFacingMode = "environment"; // 후면 카메라로 변경
+                    isFlipped = false;                 // 반전 해제
+                }
+
+                // 새로운 설정으로 웹캠 재초기화
+                webcam = new tmImage.Webcam(400, 400, isFlipped);
+                await webcam.setup({ facingMode: currentFacingMode });
+                await webcam.play();
+                
+                // 화면 캔버스 교체
+                webcamContainer.innerHTML = "";
+                webcamContainer.appendChild(webcam.canvas);
+            } catch (error) {
+                console.error("카메라 전환 중 오류 발생:", error);
+                alert("카메라 전환을 지원하지 않는 기기이거나 오류가 발생했습니다.");
+            } finally {
+                // 버튼 상태 복구
+                switchBtn.classList.remove('opacity-50', 'pointer-events-none');
+            }
+        }
+    </script>
+</body>
+</html>
